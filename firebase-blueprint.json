@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application, either a student or a teacher.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique ID of the user." },
+        "name": { "type": "string", "description": "The full name of the user." },
+        "email": { "type": "string", "description": "The email address of the user." },
+        "role": { "type": "string", "enum": ["student", "teacher"], "description": "The role of the user." }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Essay": {
+      "title": "Essay",
+      "description": "An essay written by a student.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique ID of the essay." },
+        "userId": { "type": "string", "description": "The ID of the student who wrote the essay." },
+        "userName": { "type": "string", "description": "The name of the student who wrote the essay." },
+        "title": { "type": "string", "description": "The title of the essay." },
+        "content": { "type": "string", "description": "The content of the essay." },
+        "marks": { "type": "number", "description": "The marks awarded by the teacher (0-30)." },
+        "feedback": { "type": "string", "description": "The feedback provided by the teacher." },
+        "status": { "type": "string", "enum": ["draft", "submitted", "reviewed"], "description": "The current status of the essay." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "The timestamp when the essay was created." }
+      },
+      "required": ["userId", "userName", "title", "content", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile information."
+    },
+    "/essays/{essayId}": {
+      "schema": "Essay",
+      "description": "A collection of all essays written by students."
+    }
+  }
+}
