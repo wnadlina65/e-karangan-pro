@@ -1,9 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
 
 @layer base {
   body {
     background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f2340 100%);
     background-attachment: fixed;
     color: #f1f5f9;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Robust Essay Content Styling */
+  .essay-content {
+    font-family: var(--font-sans);
+    line-height: 1.8;
+    text-align: justify;
+    text-justify: inter-word;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    word-break: break-word;
+    font-variant-ligatures: common-ligatures;
+  }
+
+  .essay-content p {
+    margin-bottom: 1.5rem;
+    text-indent: 2rem;
+  }
+}
+
+@media print {
+  @page {
+    margin: 2cm;
+    size: auto;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt !important;
+  }
+
+  /* Hide UI elements */
+  nav, button, .no-print, .backdrop-blur-sm, .absolute.inset-0, .toast-container {
+    display: none !important;
+  }
+
+  /* If a modal is open, hide the background content */
+  body:has(.fixed) main {
+    display: none !important;
+  }
+
+  /* Essay Content Print Styling */
+  .essay-content {
+    color: black !important;
+    line-height: 1.6 !important;
+    text-align: justify !important;
+    width: 100% !important;
+    display: block !important;
+  }
+
+  .essay-content p {
+    color: black !important;
+    margin-bottom: 1rem !important;
+    text-indent: 2rem !important;
+  }
+
+  /* Modal Print Handling */
+  .fixed.inset-0 {
+    position: static !important;
+    display: block !important;
+    padding: 0 !important;
+    z-index: auto !important;
+  }
+
+  .relative.w-full.max-w-3xl {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    display: block !important;
+  }
+
+  /* Hide modal header/footer buttons in print */
+  .p-8.border-b, .p-6.border-t {
+    border-color: #eee !important;
+  }
+
+  .p-8.border-b button, .p-6.border-t button {
+    display: none !important;
+  }
+
+  /* Ensure text is black */
+  h1, h2, h3, h4, span, p, div {
+    color: black !important;
+  }
+
+  .bg-slate-900, .bg-slate-950, .bg-slate-800, .bg-slate-900\/50 {
+    background: transparent !important;
+    border: none !important;
   }
 }

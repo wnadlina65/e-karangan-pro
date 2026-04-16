@@ -122,39 +122,68 @@ export default function App() {
   const [filter, setFilter] = useState<EssayStatus | 'all'>('all');
   const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
+  const handlePrint = () => {
+    console.log('Attempting to print...');
+    try {
+      window.focus();
+      // Small delay helps in some iframe environments
+      setTimeout(() => {
+        window.print();
+      }, 250);
+    } catch (error) {
+      console.error('Print error:', error);
+      showToast('Gagal mencetak. Sila cuba buka aplikasi dalam tab baru.', 'error');
+    }
+  };
+
   // Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        try {
-          const userDoc = await getDoc(userDocRef);
+      try {
+        if (firebaseUser) {
+          const userDocRef = doc(db, 'users', firebaseUser.uid);
+          let userDoc;
+          try {
+            userDoc = await getDoc(userDocRef);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+            return;
+          }
+          
           if (userDoc.exists()) {
             const userData = userDoc.data() as User;
             setUser(userData);
-            if (userData.role === 'student' && !userData.teacherId) {
-              setScreen('select-teacher');
-            } else {
-              setScreen(userData.role === 'student' ? 'dashboard' : 'review');
-            }
+            
+            setScreen(currentScreen => {
+              if (currentScreen === 'login') {
+                if (userData.role === 'student' && !userData.teacherId) return 'select-teacher';
+                return userData.role === 'student' ? 'dashboard' : 'review';
+              }
+              return currentScreen;
+            });
           } else {
+            console.log('User doc not found in Firestore for UID:', firebaseUser.uid);
+            // If user exists in Auth but not Firestore, we stay on login screen
+            // so they can "log in" again which will trigger syncUser
             setUser(null);
             setScreen('login');
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
+        } else {
+          setUser(null);
+          setScreen('login');
         }
-      } else {
-        setUser(null);
-        setScreen('login');
+      } catch (error: any) {
+        console.error('Auth listener error:', error.message);
+      } finally {
+        setIsAuthReady(true);
       }
-      setIsAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
@@ -212,42 +241,74 @@ export default function App() {
   const [loginError, setLoginError] = useState<string | null>(null);
 
   const handleSimpleLogin = async (name: string, email: string, role: Role) => {
+    console.log('handleSimpleLogin started', { name, email, role });
     try {
+      setIsLoggingIn(true);
       setLoginError(null);
       const emailKey = email.toLowerCase().trim();
       const HIDDEN_PASSWORD = 'spm_karangan_secure_no_pass';
       
       let firebaseUser;
       try {
-        // Try to sign in first
+        console.log('Attempting sign in...');
         const result = await signInWithEmailAndPassword(auth, emailKey, HIDDEN_PASSWORD);
         firebaseUser = result.user;
+        console.log('Sign in successful');
       } catch (error: any) {
-        // If user doesn't exist, create them
-        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
-          const result = await createUserWithEmailAndPassword(auth, emailKey, HIDDEN_PASSWORD);
-          firebaseUser = result.user;
+        console.log('Sign in failed, checking error code:', error.code);
+        // If user doesn't exist or credential invalid, try to create them
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+          try {
+            console.log('Attempting to create user...');
+            const result = await createUserWithEmailAndPassword(auth, emailKey, HIDDEN_PASSWORD);
+            firebaseUser = result.user;
+            console.log('User creation successful');
+          } catch (createError: any) {
+            console.error('User creation failed:', createError);
+            if (createError.code === 'auth/email-already-in-use') {
+              throw new Error('AUTH_CONFLICT');
+            }
+            throw createError;
+          }
         } else {
           throw error;
         }
       }
 
+      console.log('Syncing user to Firestore...');
       await syncUser(firebaseUser, role, name);
+      console.log('User sync complete');
     } catch (error: any) {
-      console.error('Login error:', error);
+      console.error('Login error detail:', error);
       if (error.code === 'auth/operation-not-allowed') {
         setLoginError('Sila aktifkan "Email/Password" di Firebase Console > Authentication.');
-      } else if (error.code === 'auth/email-already-in-use') {
-        showToast('Emel ini sudah digunakan dengan kaedah lain.', 'error');
+      } else if (error.code === 'auth/email-already-in-use' || error.message === 'AUTH_CONFLICT') {
+        setLoginError('Emel ini sudah berdaftar dengan kaedah lain. Sila gunakan emel yang berbeza atau hubungi pentadbir.');
+      } else if (error.code === 'auth/invalid-email') {
+        setLoginError('Format emel tidak sah.');
+      } else if (error.code === 'auth/network-request-failed') {
+        setLoginError('Ralat rangkaian. Sila semak sambungan internet anda.');
+      } else if (error.code === 'auth/internal-error') {
+        setLoginError('Ralat dalaman Firebase. Sila cuba lagi sebentar.');
       } else {
-        showToast('Gagal log masuk. Sila cuba lagi.', 'error');
+        const msg = error.message || 'Ralat tidak diketahui';
+        setLoginError(`Gagal log masuk: ${msg}`);
+        showToast('Gagal log masuk.', 'error');
       }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
   const syncUser = async (firebaseUser: any, role: Role, customName?: string) => {
     const userDocRef = doc(db, 'users', firebaseUser.uid);
-    const userDoc = await getDoc(userDocRef);
+    let userDoc;
+    try {
+      userDoc = await getDoc(userDocRef);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+      return;
+    }
     
     let userData: User;
     if (!userDoc.exists()) {
@@ -257,7 +318,12 @@ export default function App() {
         email: firebaseUser.email || '',
         role: role
       };
-      await setDoc(userDocRef, userData);
+      try {
+        await setDoc(userDocRef, userData);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${firebaseUser.uid}`);
+        return;
+      }
     } else {
       userData = userDoc.data() as User;
     }
@@ -354,6 +420,8 @@ export default function App() {
     <LoginScreen 
       onSimpleLogin={handleSimpleLogin}
       configError={loginError}
+      isLoggingIn={isLoggingIn}
+      onClearError={() => setLoginError(null)}
     />
   );
 
@@ -373,7 +441,7 @@ export default function App() {
           <Badge status={user?.role as any}>{user?.role === 'student' ? 'Pelajar' : 'Guru'}</Badge>
           <span className="text-sm font-medium text-slate-400 hidden sm:block">{user?.name}</span>
           <Button variant="secondary" onClick={handleLogout} className="px-3 py-2">
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-5 h-5" />
             <span className="hidden sm:inline">Keluar</span>
           </Button>
         </div>
@@ -397,6 +465,7 @@ export default function App() {
             onEdit={(e) => { setEditingEssay(e); setScreen('write'); }}
             onDelete={deleteEssay}
             onView={setViewingEssay}
+            onPrint={handlePrint}
           />
         )}
 
@@ -404,6 +473,7 @@ export default function App() {
           <TeacherDashboard 
             essays={essays}
             onGrade={setGradingEssay}
+            onPrint={handlePrint}
           />
         )}
 
@@ -419,7 +489,11 @@ export default function App() {
       {/* Modals */}
       <AnimatePresence>
         {viewingEssay && (
-          <ViewModal essay={viewingEssay} onClose={() => setViewingEssay(null)} />
+          <ViewModal 
+            essay={viewingEssay} 
+            onClose={() => setViewingEssay(null)} 
+            onPrint={handlePrint}
+          />
         )}
         {gradingEssay && (
           <GradeModal essay={gradingEssay} onGrade={submitGrade} onClose={() => setGradingEssay(null)} />
@@ -437,7 +511,7 @@ export default function App() {
               toast.type === 'success' ? 'bg-emerald-900/90 border-emerald-500/50 text-emerald-200' : 'bg-red-900/90 border-red-500/50 text-red-200'
             }`}
           >
-            {toast.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+            {toast.type === 'success' ? <CheckCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
             <span className="font-semibold">{toast.msg}</span>
           </motion.div>
         )}
@@ -450,10 +524,14 @@ export default function App() {
 
 function LoginScreen({ 
   onSimpleLogin,
-  configError
+  configError,
+  isLoggingIn,
+  onClearError
 }: { 
   onSimpleLogin: (n: string, e: string, r: Role) => void,
-  configError: string | null
+  configError: string | null,
+  isLoggingIn: boolean,
+  onClearError: () => void
 }) {
   const [role, setRole] = useState<Role>('student');
   const [email, setEmail] = useState('');
@@ -461,7 +539,18 @@ function LoginScreen({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Form submitted', { name, email, role });
     onSimpleLogin(name, email, role);
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+    if (configError) onClearError();
+  };
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setName(e.target.value);
+    if (configError) onClearError();
   };
 
   return (
@@ -508,7 +597,7 @@ function LoginScreen({
               required
               placeholder="Masukkan nama penuh anda"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={handleNameChange}
               className="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
             />
           </div>
@@ -519,13 +608,18 @@ function LoginScreen({
               required
               placeholder="nama@email.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={handleEmailChange}
               className="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
             />
           </div>
           
-          <Button type="submit" className="w-full py-4 text-lg">
-            Log Masuk
+          <Button type="submit" className="w-full py-4 text-lg" disabled={isLoggingIn}>
+            {isLoggingIn ? (
+              <div className="flex items-center gap-2">
+                <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                Memproses...
+              </div>
+            ) : 'Log Masuk'}
           </Button>
 
           <p className="text-center text-sm text-slate-500 mt-6">
@@ -573,7 +667,7 @@ function TeacherSelectionScreen({
                   <p className="text-xs text-slate-500">{teacher.email}</p>
                 </div>
               </div>
-              <ArrowLeft className="w-5 h-5 text-slate-600 rotate-180 group-hover:text-emerald-500 transition-colors" />
+              <ArrowLeft className="w-6 h-6 text-slate-600 rotate-180 group-hover:text-emerald-500 transition-colors" />
             </button>
           ))
         )}
@@ -590,7 +684,8 @@ function StudentDashboard({
   onWrite, 
   onEdit, 
   onDelete, 
-  onView 
+  onView,
+  onPrint
 }: { 
   user: User, 
   essays: Essay[], 
@@ -599,7 +694,8 @@ function StudentDashboard({
   onWrite: () => void,
   onEdit: (e: Essay) => void,
   onDelete: (id: string) => void,
-  onView: (e: Essay) => void
+  onView: (e: Essay) => void,
+  onPrint: () => void
 }) {
   const myEssays = essays.filter(e => e.userId === user.id);
   const reviewed = myEssays.filter(e => e.status === 'reviewed');
@@ -628,12 +724,12 @@ function StudentDashboard({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
         <h2 className="text-2xl font-bold">Karangan Saya</h2>
         <div className="flex items-center gap-3 w-full sm:w-auto">
-          <Button variant="secondary" onClick={() => window.print()} className="flex-1 sm:flex-none">
-            <Printer className="w-4 h-4" />
+          <Button variant="secondary" onClick={onPrint} className="flex-1 sm:flex-none">
+            <Printer className="w-5 h-5 pointer-events-none" />
             Cetak
           </Button>
           <Button onClick={onWrite} className="flex-1 sm:flex-none">
-            <Plus className="w-5 h-5" />
+            <Plus className="w-6 h-6 pointer-events-none" />
             Tulis Baru
           </Button>
         </div>
@@ -683,16 +779,16 @@ function StudentDashboard({
                     </div>
                   )}
                   <div className="flex gap-2">
-                    <Button variant="secondary" onClick={() => onView(essay)} className="w-10 h-10 p-0">
-                      <Eye className="w-5 h-5" />
+                    <Button variant="secondary" onClick={() => onView(essay)} className="w-12 h-12 p-0">
+                      <Eye className="w-6 h-6" />
                     </Button>
                     {essay.status !== 'reviewed' && (
-                      <Button variant="secondary" onClick={() => onEdit(essay)} className="w-10 h-10 p-0">
-                        <Edit2 className="w-5 h-5" />
+                      <Button variant="secondary" onClick={() => onEdit(essay)} className="w-12 h-12 p-0">
+                        <Edit2 className="w-6 h-6" />
                       </Button>
                     )}
-                    <Button variant="danger" onClick={() => onDelete(essay.id)} className="w-10 h-10 p-0">
-                      <Trash2 className="w-5 h-5" />
+                    <Button variant="danger" onClick={() => onDelete(essay.id)} className="w-12 h-12 p-0">
+                      <Trash2 className="w-6 h-6" />
                     </Button>
                   </div>
                 </div>
@@ -707,10 +803,12 @@ function StudentDashboard({
 
 function TeacherDashboard({ 
   essays, 
-  onGrade 
+  onGrade,
+  onPrint
 }: { 
   essays: Essay[], 
-  onGrade: (e: Essay) => void 
+  onGrade: (e: Essay) => void,
+  onPrint: () => void
 }) {
   const pending = essays.filter(e => e.status === 'submitted');
   const reviewed = essays.filter(e => e.status === 'reviewed');
@@ -734,7 +832,13 @@ function TeacherDashboard({
         </Card>
       </div>
 
-      <h2 className="text-2xl font-bold mb-8">Karangan Pelajar</h2>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
+        <h2 className="text-2xl font-bold">Karangan Pelajar</h2>
+        <Button variant="secondary" onClick={onPrint} className="w-full sm:w-auto">
+          <Printer className="w-5 h-5 pointer-events-none" />
+          Cetak Senarai
+        </Button>
+      </div>
 
       <div className="space-y-4">
         {pending.length === 0 && reviewed.length === 0 ? (
@@ -748,7 +852,7 @@ function TeacherDashboard({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-xs font-bold text-emerald-500 flex items-center gap-1.5">
-                      <UserIcon className="w-3.5 h-3.5" />
+                      <UserIcon className="w-4 h-4" />
                       {essay.userName}
                     </span>
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">• {formatDate(essay.createdAt)}</span>
@@ -800,18 +904,18 @@ function WriteScreen({
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
-          <Button variant="secondary" onClick={onCancel} className="w-10 h-10 p-0">
-            <ArrowLeft className="w-5 h-5" />
+          <Button variant="secondary" onClick={onCancel} className="w-12 h-12 p-0">
+            <ArrowLeft className="w-6 h-6" />
           </Button>
           <h2 className="text-2xl font-bold">{essay ? 'Edit Karangan' : 'Tulis Karangan Baru'}</h2>
         </div>
         <div className="flex gap-3">
           <Button variant="secondary" onClick={() => onSave(title, content, 'draft')}>
-            <Save className="w-4 h-4" />
+            <Save className="w-5 h-5" />
             Simpan Draf
           </Button>
           <Button onClick={() => onSave(title, content, 'submitted')}>
-            <Send className="w-4 h-4" />
+            <Send className="w-5 h-5" />
             Hantar
           </Button>
         </div>
@@ -861,7 +965,7 @@ function WriteScreen({
 
 // --- Modals ---
 
-function ViewModal({ essay, onClose }: { essay: Essay, onClose: () => void }) {
+function ViewModal({ essay, onClose, onPrint }: { essay: Essay, onClose: () => void, onPrint: () => void }) {
   const grade = essay.marks >= 0 ? getGradeInfo(essay.marks) : null;
 
   return (
@@ -890,15 +994,15 @@ function ViewModal({ essay, onClose }: { essay: Essay, onClose: () => void }) {
               )}
             </div>
           </div>
-          <Button variant="secondary" onClick={onClose} className="w-10 h-10 p-0 rounded-full">
-            <X className="w-5 h-5" />
+          <Button variant="secondary" onClick={onClose} className="w-12 h-12 p-0 rounded-full">
+            <X className="w-6 h-6" />
           </Button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-10">
-          <div className="prose prose-invert max-w-none">
+          <div className="essay-content">
             {essay.content.split('\n').map((p, i) => (
-              <p key={i} className="text-slate-300 text-lg leading-loose mb-6 text-justify indent-8">
+              <p key={i}>
                 {p}
               </p>
             ))}
@@ -912,7 +1016,11 @@ function ViewModal({ essay, onClose }: { essay: Essay, onClose: () => void }) {
           )}
         </div>
 
-        <div className="p-6 border-t border-white/5 bg-slate-900/50 text-right">
+        <div className="p-6 border-t border-white/5 bg-slate-900/50 flex justify-between items-center">
+          <Button variant="secondary" onClick={onPrint} className="gap-2">
+            <Printer className="w-5 h-5 pointer-events-none" />
+            Cetak Karangan
+          </Button>
           <Button variant="secondary" onClick={onClose}>Tutup</Button>
         </div>
       </motion.div>
@@ -957,21 +1065,21 @@ function GradeModal({
           <div>
             <h3 className="text-xl font-bold text-white mb-1">Nilai Karangan</h3>
             <p className="text-sm font-medium text-emerald-500 flex items-center gap-1.5">
-              <UserIcon className="w-3.5 h-3.5" />
+              <UserIcon className="w-4 h-4" />
               {essay.userName}
             </p>
           </div>
-          <Button variant="secondary" onClick={onClose} className="w-10 h-10 p-0 rounded-full">
-            <X className="w-5 h-5" />
+          <Button variant="secondary" onClick={onClose} className="w-12 h-12 p-0 rounded-full">
+            <X className="w-6 h-6" />
           </Button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-8 space-y-8">
           <div className="bg-slate-950/50 rounded-3xl p-8 border border-white/5 max-h-60 overflow-y-auto">
             <h4 className="text-lg font-bold text-white mb-4">{essay.title}</h4>
-            <div className="prose prose-invert prose-sm">
+            <div className="essay-content text-sm">
               {essay.content.split('\n').map((p, i) => (
-                <p key={i} className="text-slate-400 leading-relaxed mb-4 text-justify indent-6">{p}</p>
+                <p key={i} className="indent-6 mb-4">{p}</p>
               ))}
             </div>
           </div>
@@ -985,9 +1093,9 @@ function GradeModal({
                     <button 
                       key={s}
                       onClick={() => handleStarClick(s)}
-                      className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${stars >= s ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-800 text-slate-600 hover:bg-slate-700'}`}
+                      className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${stars >= s ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-800 text-slate-600 hover:bg-slate-700'}`}
                     >
-                      <Star className={`w-6 h-6 ${stars >= s ? 'fill-current' : ''}`} />
+                      <Star className={`w-8 h-8 ${stars >= s ? 'fill-current' : ''}`} />
                     </button>
                   ))}
                 </div>

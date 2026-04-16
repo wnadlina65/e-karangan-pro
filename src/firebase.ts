@@ -10,6 +10,8 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+console.log('Firebase initialized with project:', firebaseConfig.projectId);
+console.log('Using Firestore database:', firebaseConfig.firestoreDatabaseId || '(default)');
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
@@ -65,17 +67,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Validate Connection to Firestore
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. ");
-    }
-  }
-}
-testConnection();
+// Validate Connection to Firestore (Disabled to prevent noise in console)
+// async function testConnection() {
+//   try {
+//     await getDocFromServer(doc(db, 'test', 'connection'));
+//   } catch (error) {
+//     if(error instanceof Error && error.message.includes('the client is offline')) {
+//       console.error("Please check your Firebase configuration. ");
+//     }
+//   }
+// }
+// testConnection();
 
 export { signOut, onAuthStateChanged, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously };
 export type { FirebaseUser, DocumentData, FirestoreError };
