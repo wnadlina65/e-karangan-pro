@@ -395,13 +395,23 @@ export default function App() {
         return;
       }
 
-      // Validation 2: Word counts
+      // Validation 2: Word counts (Min)
       if (section === 'A' && words < WORD_TARGET_A_MIN) {
         showToast(`Karangan gagal dihantar! Jumlah patah perkataan kurang daripada ${WORD_TARGET_A_MIN}-${WORD_TARGET_A_MAX}.`, "error");
         return;
       }
       if (section === 'B' && words < WORD_TARGET_B_MIN) {
         showToast(`Karangan gagal dihantar! Jumlah patah perkataan kurang daripada ${WORD_TARGET_B_MIN}-${WORD_TARGET_B_MAX}.`, "error");
+        return;
+      }
+
+      // Validation 3: Word counts (Max)
+      if (section === 'A' && words > WORD_TARGET_A_MAX) {
+        showToast("Karangan gagal dihantar! Karangan telah melebihi had maksimum perkataan.", "error");
+        return;
+      }
+      if (section === 'B' && words > WORD_TARGET_B_MAX) {
+        showToast("Karangan gagal dihantar! Karangan telah melebihi had maksimum perkataan.", "error");
         return;
       }
     }
@@ -770,10 +780,6 @@ function StudentDashboard({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
         <h2 className="text-2xl font-bold">Karangan Saya</h2>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-          <Button variant="secondary" onClick={onPrint} className="flex-1 sm:flex-none">
-            <Printer className="w-5 h-5 pointer-events-none" />
-            Cetak
-          </Button>
           <Button onClick={() => onWrite('A')} className="flex-1 sm:flex-none bg-emerald-600">
             <Plus className="w-5 h-5 pointer-events-none" />
             Tulis Karangan A
