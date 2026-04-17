@@ -66,7 +66,9 @@ let aiClient: any = null;
 
 function getAiClient() {
   if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Membaca dari VITE_ (untuk GitHub Pages) atau GEMINI_API_KEY (untuk AI Studio/Lokal)
+    const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    
     if (!apiKey || apiKey === 'undefined' || apiKey === 'TODO_KEY') {
       throw new Error('GEMINI_API_KEY is missing or not configured.');
     }
@@ -780,6 +782,10 @@ function StudentDashboard({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
         <h2 className="text-2xl font-bold">Karangan Saya</h2>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+          <Button variant="secondary" onClick={onPrint} className="flex-1 sm:flex-none">
+            <Printer className="w-5 h-5 pointer-events-none" />
+            Cetak
+          </Button>
           <Button onClick={() => onWrite('A')} className="flex-1 sm:flex-none bg-emerald-600">
             <Plus className="w-5 h-5 pointer-events-none" />
             Tulis Karangan A
