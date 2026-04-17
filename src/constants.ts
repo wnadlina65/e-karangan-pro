@@ -5,7 +5,8 @@
 
 import { GradeInfo } from './types';
 
-export const WORD_TARGET_A = 210;
+export const WORD_TARGET_A_MIN = 150;
+export const WORD_TARGET_A_MAX = 210;
 export const WORD_TARGET_B_MIN = 350;
 export const WORD_TARGET_B_MAX = 510;
 

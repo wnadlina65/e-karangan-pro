@@ -30,7 +30,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { User, Essay, Role, EssayStatus } from './types';
 import { 
-  WORD_TARGET_A,
+  WORD_TARGET_A_MIN,
+  WORD_TARGET_A_MAX,
   WORD_TARGET_B_MIN,
   WORD_TARGET_B_MAX,
   MAX_MARKS_A, 
@@ -61,7 +62,18 @@ import {
   createUserWithEmailAndPassword
 } from './firebase';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let aiClient: any = null;
+
+function getAiClient() {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'undefined' || apiKey === 'TODO_KEY') {
+      throw new Error('GEMINI_API_KEY is missing or not configured.');
+    }
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+}
 
 // --- Components ---
 
@@ -373,6 +385,26 @@ export default function App() {
 
   const saveEssay = async (title: string, content: string, status: EssayStatus, section: 'A' | 'B') => {
     if (!user || !user.teacherId) return;
+
+    if (status === 'submitted') {
+      const words = countWords(content);
+      
+      // Validation 1: Blank content
+      if (words === 0) {
+        showToast("Ruang karangan kosong. Karangan gagal dihantar. Sila tulis karangan anda!", "error");
+        return;
+      }
+
+      // Validation 2: Word counts
+      if (section === 'A' && words < WORD_TARGET_A_MIN) {
+        showToast(`Karangan gagal dihantar! Jumlah patah perkataan kurang daripada ${WORD_TARGET_A_MIN}-${WORD_TARGET_A_MAX}.`, "error");
+        return;
+      }
+      if (section === 'B' && words < WORD_TARGET_B_MIN) {
+        showToast(`Karangan gagal dihantar! Jumlah patah perkataan kurang daripada ${WORD_TARGET_B_MIN}-${WORD_TARGET_B_MAX}.`, "error");
+        return;
+      }
+    }
     
     const essayId = editingEssay?.id || crypto.randomUUID();
     const essayData: Omit<Essay, 'id'> = {
@@ -927,8 +959,8 @@ function WriteScreen({
   const section = essay?.section || initialSection;
   
   const words = useMemo(() => countWords(content), [content]);
-  const TARGET_DESC = section === 'A' ? `Maksimum ${WORD_TARGET_A}` : `${WORD_TARGET_B_MIN} - ${WORD_TARGET_B_MAX}`;
-  const TARGET_MAX = section === 'A' ? WORD_TARGET_A : WORD_TARGET_B_MAX;
+  const TARGET_DESC = section === 'A' ? `${WORD_TARGET_A_MIN} - ${WORD_TARGET_A_MAX}` : `${WORD_TARGET_B_MIN} - ${WORD_TARGET_B_MAX}`;
+  const TARGET_MAX = section === 'A' ? WORD_TARGET_A_MAX : WORD_TARGET_B_MAX;
   const progress = Math.min((words / TARGET_MAX) * 100, 100);
 
   return (
@@ -981,7 +1013,7 @@ function WriteScreen({
 
         <div className="bg-slate-900 rounded-2xl p-6 border border-white/5">
           <div className="flex items-center justify-between mb-4">
-            <span className={`text-sm font-bold ${words >= (section === 'A' ? 0 : WORD_TARGET_B_MIN) && words <= TARGET_MAX ? 'text-emerald-500' : 'text-slate-400'}`}>
+            <span className={`text-sm font-bold ${words >= (section === 'A' ? WORD_TARGET_A_MIN : WORD_TARGET_B_MIN) && words <= TARGET_MAX ? 'text-emerald-500' : 'text-slate-400'}`}>
               {words} patah perkataan
             </span>
             <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Sasaran: {TARGET_DESC}</span>
@@ -1130,16 +1162,19 @@ function GradeModal({
       });
 
       // 2. Internet/AI Check using Gemini
-      const internetResult = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [essay.content],
-        config: { 
-          systemInstruction: "You are a plagiarism detection assistant. Analyze the Malay essay provided for similarity to known online content or common AI-generated patterns. Return JSON with 'score' (0-100) and 'reason' (short string).",
+      const ai = getAiClient();
+      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+      
+      const internetResult = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: `Analyze this Malay essay for plagiarism or AI generation:\n\n${essay.content}` }] }],
+        generationConfig: { 
           responseMimeType: "application/json" 
-        }
+        },
+        systemInstruction: "You are a plagiarism detection assistant. Analyze the Malay essay provided for similarity to known online content or common AI-generated patterns. Return JSON with 'score' (0-100) and 'reason' (short string)."
       });
 
-      const internetData = JSON.parse(internetResult.text || '{"score": 0, "reason": ""}');
+      const response = await internetResult.response;
+      const internetData = JSON.parse(response.text() || '{"score": 0, "reason": ""}');
       const finalScore = Math.max(Math.round(maxSimilarity * 100), internetData.score);
       let details = "";
       
