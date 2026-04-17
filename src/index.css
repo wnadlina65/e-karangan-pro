@@ -86,11 +86,28 @@
     box-shadow: none !important;
     background: transparent !important;
     display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Specific fix for internal scroll containers */
+  .overflow-y-auto, .overflow-hidden, .max-h-\[90vh\] {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  /* Ensure flex containers don't restrict height */
+  .flex.flex-col, .flex-1 {
+    display: block !important;
+    height: auto !important;
   }
 
   /* Hide modal header/footer buttons in print */
   .p-8.border-b, .p-6.border-t {
     border-color: #eee !important;
+    background: transparent !important;
   }
 
   .p-8.border-b button, .p-6.border-t button {

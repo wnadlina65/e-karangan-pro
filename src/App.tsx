@@ -21,17 +21,25 @@ import {
   Archive,
   Printer,
   X,
-  Star
+  Star,
+  ShieldCheck,
+  Search,
+  Globe,
+  Users as UsersGroup
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, Essay, Role, EssayStatus } from './types';
 import { 
-  WORD_TARGET, 
-  MAX_MARKS, 
+  WORD_TARGET_A,
+  WORD_TARGET_B_MIN,
+  WORD_TARGET_B_MAX,
+  MAX_MARKS_A, 
+  MAX_MARKS_B, 
   getGradeInfo, 
   formatDate, 
   countWords 
 } from './constants';
+import { GoogleGenAI } from "@google/genai";
 import { 
   auth, 
   db, 
@@ -52,6 +60,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword
 } from './firebase';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // --- Components ---
 
@@ -117,6 +127,7 @@ export default function App() {
   const [teachers, setTeachers] = useState<User[]>([]);
   const [screen, setScreen] = useState<'login' | 'dashboard' | 'write' | 'review' | 'select-teacher'>('login');
   const [editingEssay, setEditingEssay] = useState<Essay | null>(null);
+  const [writingSection, setWritingSection] = useState<'A' | 'B'>('B');
   const [viewingEssay, setViewingEssay] = useState<Essay | null>(null);
   const [gradingEssay, setGradingEssay] = useState<Essay | null>(null);
   const [filter, setFilter] = useState<EssayStatus | 'all'>('all');
@@ -360,7 +371,7 @@ export default function App() {
     }
   };
 
-  const saveEssay = async (title: string, content: string, status: EssayStatus) => {
+  const saveEssay = async (title: string, content: string, status: EssayStatus, section: 'A' | 'B') => {
     if (!user || !user.teacherId) return;
     
     const essayId = editingEssay?.id || crypto.randomUUID();
@@ -370,6 +381,7 @@ export default function App() {
       teacherId: user.teacherId,
       title,
       content,
+      section,
       marks: editingEssay?.marks ?? -1,
       feedback: editingEssay?.feedback ?? '',
       status,
@@ -461,8 +473,8 @@ export default function App() {
             essays={essays} 
             filter={filter}
             setFilter={setFilter}
-            onWrite={() => setScreen('write')}
-            onEdit={(e) => { setEditingEssay(e); setScreen('write'); }}
+            onWrite={(s) => { setWritingSection(s); setScreen('write'); }}
+            onEdit={(e) => { setEditingEssay(e); setWritingSection(e.section); setScreen('write'); }}
             onDelete={deleteEssay}
             onView={setViewingEssay}
             onPrint={handlePrint}
@@ -480,6 +492,7 @@ export default function App() {
         {screen === 'write' && (
           <WriteScreen 
             essay={editingEssay} 
+            section={writingSection}
             onSave={saveEssay} 
             onCancel={() => { setScreen('dashboard'); setEditingEssay(null); }} 
           />
@@ -496,7 +509,7 @@ export default function App() {
           />
         )}
         {gradingEssay && (
-          <GradeModal essay={gradingEssay} onGrade={submitGrade} onClose={() => setGradingEssay(null)} />
+          <GradeModal essay={gradingEssay} allEssays={essays} onGrade={submitGrade} onClose={() => setGradingEssay(null)} />
         )}
       </AnimatePresence>
 
@@ -691,7 +704,7 @@ function StudentDashboard({
   essays: Essay[], 
   filter: EssayStatus | 'all',
   setFilter: (f: EssayStatus | 'all') => void,
-  onWrite: () => void,
+  onWrite: (s: 'A' | 'B') => void,
   onEdit: (e: Essay) => void,
   onDelete: (id: string) => void,
   onView: (e: Essay) => void,
@@ -716,21 +729,25 @@ function StudentDashboard({
           <p className="text-4xl font-black text-emerald-500">{reviewed.length}</p>
         </Card>
         <Card className="p-6">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Purata Markah</p>
-          <p className="text-4xl font-black text-blue-500">{avgMarks ?? '—'}<span className="text-lg text-slate-600 ml-1">/30</span></p>
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Purata Markah (%)</p>
+          <p className="text-4xl font-black text-blue-500">{avgMarks ?? '—'}<span className="text-lg text-slate-600 ml-1">%</span></p>
         </Card>
       </div>
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
         <h2 className="text-2xl font-bold">Karangan Saya</h2>
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
           <Button variant="secondary" onClick={onPrint} className="flex-1 sm:flex-none">
             <Printer className="w-5 h-5 pointer-events-none" />
             Cetak
           </Button>
-          <Button onClick={onWrite} className="flex-1 sm:flex-none">
-            <Plus className="w-6 h-6 pointer-events-none" />
-            Tulis Baru
+          <Button onClick={() => onWrite('A')} className="flex-1 sm:flex-none bg-emerald-600">
+            <Plus className="w-5 h-5 pointer-events-none" />
+            Tulis Karangan A
+          </Button>
+          <Button onClick={() => onWrite('B')} className="flex-1 sm:flex-none bg-blue-600">
+            <Plus className="w-5 h-5 pointer-events-none" />
+            Tulis Karangan B
           </Button>
         </div>
       </div>
@@ -764,8 +781,10 @@ function StudentDashboard({
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-3">
-                    <Badge status={essay.status}>{essay.status}</Badge>
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{formatDate(essay.createdAt)}</span>
+                    <Badge status={essay.status === 'reviewed' ? 'reviewed' : essay.status === 'draft' ? 'draft' : 'submitted'}>
+                      Karangan {essay.section}
+                    </Badge>
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">• {formatDate(essay.createdAt)}</span>
                   </div>
                   <h3 className="text-xl font-bold text-white mb-2 truncate group-hover:text-emerald-400 transition-colors">{essay.title}</h3>
                   <p className="text-slate-400 text-sm line-clamp-2 leading-relaxed">{essay.content}</p>
@@ -775,7 +794,10 @@ function StudentDashboard({
                   {essay.marks >= 0 && (
                     <div className="text-right">
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Markah</p>
-                      <p className="text-2xl font-black" style={{ color: getGradeInfo(essay.marks).color }}>{essay.marks}<span className="text-sm opacity-50">/30</span></p>
+                      <p className="text-2xl font-black" style={{ color: getGradeInfo(essay.marks, essay.section).color }}>
+                        {essay.marks}
+                        <span className="text-sm opacity-50">/{essay.section === 'A' ? MAX_MARKS_A : MAX_MARKS_B}</span>
+                      </p>
                     </div>
                   )}
                   <div className="flex gap-2">
@@ -855,6 +877,9 @@ function TeacherDashboard({
                       <UserIcon className="w-4 h-4" />
                       {essay.userName}
                     </span>
+                    <span className="px-2 py-0.5 bg-slate-800 border border-white/5 rounded text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Karangan {essay.section}
+                    </span>
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">• {formatDate(essay.createdAt)}</span>
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">• {countWords(essay.content)} perkataan</span>
                   </div>
@@ -887,18 +912,23 @@ function TeacherDashboard({
 
 function WriteScreen({ 
   essay, 
+  section: initialSection,
   onSave, 
   onCancel 
 }: { 
   essay: Essay | null, 
-  onSave: (t: string, c: string, s: EssayStatus) => void, 
+  section: 'A' | 'B',
+  onSave: (t: string, c: string, s: EssayStatus, sec: 'A' | 'B') => void, 
   onCancel: () => void 
 }) {
   const [title, setTitle] = useState(essay?.title || '');
   const [content, setContent] = useState(essay?.content || '');
+  const section = essay?.section || initialSection;
   
   const words = useMemo(() => countWords(content), [content]);
-  const progress = Math.min((words / WORD_TARGET) * 100, 100);
+  const TARGET_DESC = section === 'A' ? `Maksimum ${WORD_TARGET_A}` : `${WORD_TARGET_B_MIN} - ${WORD_TARGET_B_MAX}`;
+  const TARGET_MAX = section === 'A' ? WORD_TARGET_A : WORD_TARGET_B_MAX;
+  const progress = Math.min((words / TARGET_MAX) * 100, 100);
 
   return (
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-4xl mx-auto">
@@ -907,14 +937,19 @@ function WriteScreen({
           <Button variant="secondary" onClick={onCancel} className="w-12 h-12 p-0">
             <ArrowLeft className="w-6 h-6" />
           </Button>
-          <h2 className="text-2xl font-bold">{essay ? 'Edit Karangan' : 'Tulis Karangan Baru'}</h2>
+          <div>
+            <h2 className="text-2xl font-bold">{essay ? 'Edit Karangan' : 'Tulis Karangan Baru'}</h2>
+            <p className="text-xs font-black text-emerald-500 uppercase tracking-[0.2em] mt-1">
+              Karangan {section} (Sasaran: {TARGET_DESC} patah perkataan)
+            </p>
+          </div>
         </div>
         <div className="flex gap-3">
-          <Button variant="secondary" onClick={() => onSave(title, content, 'draft')}>
+          <Button variant="secondary" onClick={() => onSave(title, content, 'draft', section)}>
             <Save className="w-5 h-5" />
             Simpan Draf
           </Button>
-          <Button onClick={() => onSave(title, content, 'submitted')}>
+          <Button onClick={() => onSave(title, content, 'submitted', section)}>
             <Send className="w-5 h-5" />
             Hantar
           </Button>
@@ -945,10 +980,10 @@ function WriteScreen({
 
         <div className="bg-slate-900 rounded-2xl p-6 border border-white/5">
           <div className="flex items-center justify-between mb-4">
-            <span className={`text-sm font-bold ${words >= WORD_TARGET ? 'text-emerald-500' : 'text-slate-400'}`}>
+            <span className={`text-sm font-bold ${words >= (section === 'A' ? 0 : WORD_TARGET_B_MIN) && words <= TARGET_MAX ? 'text-emerald-500' : 'text-slate-400'}`}>
               {words} patah perkataan
             </span>
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Sasaran: {WORD_TARGET}</span>
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Sasaran: {TARGET_DESC}</span>
           </div>
           <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
             <motion.div 
@@ -966,10 +1001,11 @@ function WriteScreen({
 // --- Modals ---
 
 function ViewModal({ essay, onClose, onPrint }: { essay: Essay, onClose: () => void, onPrint: () => void }) {
-  const grade = essay.marks >= 0 ? getGradeInfo(essay.marks) : null;
+  const grade = essay.marks >= 0 ? getGradeInfo(essay.marks, essay.section) : null;
+  const maxMarks = essay.section === 'A' ? MAX_MARKS_A : MAX_MARKS_B;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 no-print">
       <motion.div 
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={onClose}
@@ -979,22 +1015,32 @@ function ViewModal({ essay, onClose, onPrint }: { essay: Essay, onClose: () => v
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="relative w-full max-w-3xl bg-slate-900 border border-white/10 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-3xl bg-slate-900 border border-white/10 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] print-content"
       >
         <div className="p-8 border-b border-white/5 flex items-center justify-between bg-slate-900/50">
           <div>
             <h3 className="text-2xl font-bold text-white mb-2">{essay.title}</h3>
             <div className="flex items-center gap-3">
+              <Badge status={essay.status === 'reviewed' ? 'reviewed' : essay.status === 'draft' ? 'draft' : 'submitted'}>
+                Karangan {essay.section}
+              </Badge>
               <Badge status={essay.status}>{essay.status}</Badge>
               <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{formatDate(essay.createdAt)}</span>
               {grade && (
-                <span className="text-sm font-bold" style={{ color: grade.color }}>
-                  • {essay.marks}/30 - {grade.text}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold" style={{ color: grade.color }}>
+                    • {essay.marks}/{maxMarks} - {grade.text}
+                  </span>
+                  <div className="flex gap-0.5">
+                    {[1, 2, 3, 4, 5, 6].map(s => (
+                      <Star key={s} className={`w-3.5 h-3.5 ${s <= grade.stars ? 'text-amber-500 fill-current' : 'text-slate-700'}`} />
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>
-          <Button variant="secondary" onClick={onClose} className="w-12 h-12 p-0 rounded-full">
+          <Button variant="secondary" onClick={onClose} className="w-12 h-12 p-0 rounded-full no-print">
             <X className="w-6 h-6" />
           </Button>
         </div>
@@ -1030,23 +1076,97 @@ function ViewModal({ essay, onClose, onPrint }: { essay: Essay, onClose: () => v
 
 function GradeModal({ 
   essay, 
+  allEssays,
   onGrade, 
   onClose 
 }: { 
   essay: Essay, 
+  allEssays: Essay[],
   onGrade: (id: string, m: number, f: string) => void, 
   onClose: () => void 
 }) {
   const [marks, setMarks] = useState(essay.marks >= 0 ? essay.marks : 0);
   const [feedback, setFeedback] = useState(essay.feedback || '');
-  const [stars, setStars] = useState(essay.marks >= 0 ? Math.ceil(essay.marks / 6) : 0);
+  const [stars, setStars] = useState(essay.marks >= 0 ? getGradeInfo(essay.marks).stars : 0);
+  const [checkingPlagiarism, setCheckingPlagiarism] = useState(false);
+  const [plagiarismReport, setPlagiarismReport] = useState<{ score: number, details: string } | null>(null);
+
+  const maxMarks = essay.section === 'A' ? MAX_MARKS_A : MAX_MARKS_B;
 
   const handleStarClick = (s: number) => {
     setStars(s);
-    setMarks(s * 6);
+    // Automatically set a base mark for that stars level
+    const starPercentages = [0, 5, 25, 45, 65, 80, 95];
+    const val = Math.round((starPercentages[s] / 100) * maxMarks);
+    setMarks(val);
   };
 
-  const gradeInfo = getGradeInfo(marks);
+  const gradeInfo = getGradeInfo(marks, essay.section);
+
+  const checkPlagiarism = async () => {
+    setCheckingPlagiarism(true);
+    try {
+      // 1. Local Comparison (Classmates)
+      const currentTrigrams = getTrigrams(essay.content);
+      let maxSimilarity = 0;
+      let mostSimilarEssay: Essay | null = null;
+
+      allEssays.forEach(other => {
+        if (other.id === essay.id) return;
+        const otherTrigrams = getTrigrams(other.content);
+        if (otherTrigrams.size === 0 || currentTrigrams.size === 0) return;
+        
+        let matches = 0;
+        currentTrigrams.forEach(t => {
+          if (otherTrigrams.has(t)) matches++;
+        });
+        
+        const sim = matches / currentTrigrams.size;
+        if (sim > maxSimilarity) {
+          maxSimilarity = sim;
+          mostSimilarEssay = other;
+        }
+      });
+
+      // 2. Internet/AI Check using Gemini
+      const internetResult = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [essay.content],
+        config: { 
+          systemInstruction: "You are a plagiarism detection assistant. Analyze the Malay essay provided for similarity to known online content or common AI-generated patterns. Return JSON with 'score' (0-100) and 'reason' (short string).",
+          responseMimeType: "application/json" 
+        }
+      });
+
+      const internetData = JSON.parse(internetResult.text || '{"score": 0, "reason": ""}');
+      const finalScore = Math.max(Math.round(maxSimilarity * 100), internetData.score);
+      let details = "";
+      
+      if (maxSimilarity > 0.3) {
+        details = `Kesamaan tinggi (${Math.round(maxSimilarity*100)}%) dikesan dengan karangan ${mostSimilarEssay?.userName}. `;
+      }
+      if (internetData.score > 30) {
+        details += `Analisis AI menunjukkan kebarangkalian kandungan disalin atau dijana AI (${internetData.score}%). `;
+      }
+      if (!details) details = "Tiada unsur plagiat ketara dikesan.";
+
+      setPlagiarismReport({ score: finalScore, details });
+    } catch (error) {
+      console.error("Plagiarism check failed:", error);
+      setPlagiarismReport({ score: 0, details: "Gagal melakukan semakan. Sila cuba lagi." });
+    } finally {
+      setCheckingPlagiarism(false);
+    }
+  };
+
+  function getTrigrams(text: string) {
+    const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+    const trigrams = new Set<string>();
+    for (let i = 0; i < words.length - 2; i++) {
+      trigrams.add(`${words[i]} ${words[i+1]} ${words[i+2]}`);
+    }
+    return trigrams;
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
@@ -1059,7 +1179,7 @@ function GradeModal({
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="relative w-full max-w-3xl bg-slate-900 border border-white/10 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-4xl bg-slate-900 border border-white/10 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         <div className="p-8 border-b border-white/5 flex items-center justify-between bg-slate-900/50">
           <div>
@@ -1075,66 +1195,138 @@ function GradeModal({
         </div>
 
         <div className="flex-1 overflow-y-auto p-8 space-y-8">
-          <div className="bg-slate-950/50 rounded-3xl p-8 border border-white/5 max-h-60 overflow-y-auto">
-            <h4 className="text-lg font-bold text-white mb-4">{essay.title}</h4>
-            <div className="essay-content text-sm">
-              {essay.content.split('\n').map((p, i) => (
-                <p key={i} className="indent-6 mb-4">{p}</p>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Left Column: Content */}
             <div className="space-y-6">
+              <div className="bg-slate-950/50 rounded-3xl p-8 border border-white/5 h-[400px] overflow-y-auto">
+                <h4 className="text-lg font-bold text-white mb-4 italic underline decoration-emerald-500/50 uppercase tracking-tight">{essay.title}</h4>
+                <div className="essay-content text-sm leading-relaxed text-slate-300">
+                  {essay.content.split('\n').map((p, i) => (
+                    <p key={i} className="indent-6 mb-4">{p}</p>
+                  ))}
+                </div>
+              </div>
+
+              {/* Plagiarism Section */}
+              <div className="bg-slate-900/50 rounded-3xl p-6 border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                    Semakan Plagiat
+                  </h4>
+                  <Button 
+                    variant="secondary" 
+                    className="py-1 px-3 text-xs h-auto gap-2 bg-slate-800 border-white/5 hover:bg-slate-700"
+                    onClick={checkPlagiarism}
+                    disabled={checkingPlagiarism}
+                  >
+                    {checkingPlagiarism ? (
+                      <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Search className="w-3 h-3" />
+                    )}
+                    {checkingPlagiarism ? 'Menyemak...' : 'Semak Sekarang'}
+                  </Button>
+                </div>
+
+                {plagiarismReport ? (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                    className={`p-4 rounded-2xl border ${plagiarismReport.score > 30 ? 'bg-red-500/5 border-red-500/20' : 'bg-emerald-500/5 border-emerald-500/20'}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-xs font-bold ${plagiarismReport.score > 30 ? 'text-red-400' : 'text-emerald-400'}`}>
+                        Indeks Kesamaan: {plagiarismReport.score}%
+                      </span>
+                      <div className="flex gap-1">
+                        <UsersGroup className={`w-3.5 h-3.5 ${plagiarismReport.score > 30 ? 'text-red-500' : 'text-slate-500'}`} />
+                        <Globe className={`w-3.5 h-3.5 ${plagiarismReport.score > 50 ? 'text-red-500' : 'text-slate-500'}`} />
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-normal">{plagiarismReport.details}</p>
+                  </motion.div>
+                ) : (
+                  <div className="p-4 rounded-2xl border border-white/5 bg-slate-950/30 flex items-center justify-center">
+                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest text-center">
+                      Semak untuk kesamaan dengan karangan rujukan & AI
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Grading */}
+            <div className="space-y-8">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 ml-1">Penilaian Pantas (Bintang)</label>
-                <div className="flex gap-2">
-                  {[1, 2, 3, 4, 5].map(s => (
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 ml-1">Penilaian Bintang (1-6)</label>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {[1, 2, 3, 4, 5, 6].map(s => (
                     <button 
                       key={s}
                       onClick={() => handleStarClick(s)}
-                      className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${stars >= s ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-800 text-slate-600 hover:bg-slate-700'}`}
+                      className={`h-14 rounded-2xl flex items-center justify-center transition-all ${stars >= s ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-800 text-slate-600 hover:bg-slate-700'}`}
                     >
-                      <Star className={`w-8 h-8 ${stars >= s ? 'fill-current' : ''}`} />
+                      <Star className={`w-7 h-7 ${stars >= s ? 'fill-current' : ''}`} />
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 ml-1">Markah Tepat (0-30)</label>
-                <div className="flex items-center gap-4">
-                  <input 
-                    type="number" 
-                    min={0}
-                    max={30}
-                    value={marks}
-                    onChange={(e) => setMarks(Number(e.target.value))}
-                    className="w-24 bg-slate-800 border border-white/5 rounded-2xl px-5 py-4 text-2xl font-black text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                  />
+              <div className="bg-slate-950/30 p-6 rounded-[2rem] border border-white/5">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 ml-1">Markah Keseluruhan (0-{maxMarks})</label>
+                <div className="flex items-center gap-6">
+                  <div className="relative">
+                    <input 
+                      type="number" 
+                      min={0}
+                      max={maxMarks}
+                      value={marks}
+                      onChange={(e) => {
+                        const val = Math.min(Number(e.target.value), maxMarks);
+                        setMarks(val);
+                        setStars(getGradeInfo(val, essay.section).stars);
+                      }}
+                      className="w-32 bg-slate-950 border-2 border-white/5 rounded-3xl px-6 py-6 text-4xl font-black text-white focus:outline-none focus:ring-4 focus:ring-emerald-500/20 transition-all text-center"
+                    />
+                    <span className="absolute -top-2 -right-2 bg-emerald-500 text-[10px] font-black px-2 py-0.5 rounded-lg text-slate-950">/{maxMarks}</span>
+                  </div>
                   <div className="flex-1">
-                    <p className="text-sm font-bold" style={{ color: gradeInfo.color }}>{gradeInfo.text}</p>
-                    <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Tahap Penguasaan</p>
+                    <p className="text-xl font-black mb-1" style={{ color: gradeInfo.color }}>{gradeInfo.text}</p>
+                    <div className="flex gap-1 h-3 bg-slate-800 rounded-full overflow-hidden max-w-[200px]">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(marks/maxMarks)*100}%` }}
+                        className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 ml-1">Ulasan / Maklum Balas</label>
-              <textarea 
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                placeholder="Tulis ulasan anda di sini..."
-                className="w-full bg-slate-800 border border-white/5 rounded-2xl px-6 py-5 text-slate-300 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none h-40"
-              />
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 ml-1">Maklum Balas Terperinci</label>
+                <textarea 
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Berikan ulasan membina untuk membantu pelajar meningkatkan kualiti penulisan..."
+                  className="w-full bg-slate-800 border-2 border-white/5 rounded-3xl px-8 py-6 text-slate-300 text-sm leading-relaxed focus:outline-none focus:ring-4 focus:ring-emerald-500/10 resize-none h-48 transition-all"
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="p-8 border-t border-white/5 bg-slate-900/50 flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose}>Batal</Button>
-          <Button onClick={() => onGrade(essay.id, marks, feedback)}>Simpan Penilaian</Button>
+        <div className="p-8 border-t border-white/5 bg-slate-900/50 flex justify-end items-center gap-4">
+          <div className="mr-auto">
+            <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Status: {marks >= 0 ? 'Telah Dinilai' : 'Menunggu Penilaian'}</p>
+          </div>
+          <Button variant="secondary" onClick={onClose} className="px-8 border-white/10">Batal</Button>
+          <Button 
+            onClick={() => onGrade(essay.id, marks, feedback)}
+            className="px-10 bg-gradient-to-r from-emerald-500 to-blue-600 hover:from-emerald-400 hover:to-blue-500 shadow-xl shadow-emerald-500/10 border-0"
+          >
+            Simpan & Hantar
+          </Button>
         </div>
       </motion.div>
     </div>

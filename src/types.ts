@@ -22,6 +22,7 @@ export interface Essay {
   teacherId: string; // The teacher who should grade this essay
   title: string;
   content: string;
+  section: 'A' | 'B'; // Bahagian A or Bahagian B
   marks: number; // -1 if not graded
   feedback: string;
   status: EssayStatus;
@@ -31,4 +32,5 @@ export interface Essay {
 export interface GradeInfo {
   text: string;
   color: string;
+  stars: number;
 }
