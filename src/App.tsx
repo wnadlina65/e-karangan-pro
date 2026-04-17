@@ -1169,18 +1169,16 @@ function GradeModal({
 
       // 2. Internet/AI Check using Gemini
       const ai = getAiClient();
-      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-      
-      const internetResult = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: `Analyze this Malay essay for plagiarism or AI generation:\n\n${essay.content}` }] }],
-        generationConfig: { 
-          responseMimeType: "application/json" 
-        },
-        systemInstruction: "You are a plagiarism detection assistant. Analyze the Malay essay provided for similarity to known online content or common AI-generated patterns. Return JSON with 'score' (0-100) and 'reason' (short string)."
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Analyze this Malay essay for plagiarism or AI generation:\n\n${essay.content}`,
+        config: { 
+          responseMimeType: "application/json",
+          systemInstruction: "You are a plagiarism detection assistant. Analyze the Malay essay provided for similarity to known online content or common AI-generated patterns. Return JSON with 'score' (0-100) and 'reason' (short string)."
+        }
       });
 
-      const response = await internetResult.response;
-      const internetData = JSON.parse(response.text() || '{"score": 0, "reason": ""}');
+      const internetData = JSON.parse(response.text || '{"score": 0, "reason": ""}');
       const finalScore = Math.max(Math.round(maxSimilarity * 100), internetData.score);
       let details = "";
       
