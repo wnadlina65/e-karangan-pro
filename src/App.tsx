@@ -422,8 +422,9 @@ export default function App() {
 
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full"></div>
+      <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center gap-6">
+        <div className="animate-spin w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full shadow-2xl shadow-emerald-500/20"></div>
+        <div className="text-emerald-500/50 text-xs font-black uppercase tracking-[0.3em] animate-pulse">Sila Tunggu...</div>
       </div>
     );
   }
@@ -889,7 +890,7 @@ function TeacherDashboard({
                 
                 <div className="flex items-center gap-6">
                   {essay.marks >= 0 ? (
-                    <div className="w-14 h-14 rounded-full border-4 flex items-center justify-center text-xl font-black" style={{ borderColor: getGradeInfo(essay.marks).color, color: getGradeInfo(essay.marks).color }}>
+                    <div className="w-14 h-14 rounded-full border-4 flex items-center justify-center text-xl font-black" style={{ borderColor: getGradeInfo(essay.marks, essay.section).color, color: getGradeInfo(essay.marks, essay.section).color }}>
                       {essay.marks}
                     </div>
                   ) : (
