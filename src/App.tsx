@@ -56,6 +56,8 @@ import {
   query, 
   where, 
   onSnapshot,
+  getDocFromServer,
+  serverTimestamp,
   handleFirestoreError,
   OperationType,
   signInWithEmailAndPassword,
@@ -171,13 +173,18 @@ export default function App() {
   // Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Don't interfere if we're in the middle of a manual login process
+      if (isLoggingIn) return;
+
       try {
         if (firebaseUser) {
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           let userDoc;
           try {
-            userDoc = await getDoc(userDocRef);
+            // Use getDocFromServer for the initial session load to ensure fresh permissions
+            userDoc = await getDocFromServer(userDocRef);
           } catch (err) {
+            console.error('Initial load getDoc error:', err);
             handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
             return;
           }
@@ -195,8 +202,10 @@ export default function App() {
             });
           } else {
             console.log('User doc not found in Firestore for UID:', firebaseUser.uid);
-            // If user exists in Auth but not Firestore, we stay on login screen
-            // so they can "log in" again which will trigger syncUser
+            // Sign out if no doc found on initial session load to force re-login/registration
+            if (!isLoggingIn) {
+              await signOut(auth);
+            }
             setUser(null);
             setScreen('login');
           }
@@ -211,7 +220,7 @@ export default function App() {
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [isLoggingIn]);
 
   // Fetch Teachers
   useEffect(() => {
@@ -273,19 +282,6 @@ export default function App() {
       const emailKey = email.toLowerCase().trim();
       const HIDDEN_PASSWORD = 'spm_karangan_secure_no_pass';
       
-      // PRE-AUTH VALIDATION: Check if email exists with a different name
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', emailKey));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        const existingUser = querySnapshot.docs[0].data() as User;
-        // Strict comparison: Name must match exactly as stored (case-sensitive, trimmed)
-        if (existingUser.name.trim() !== name.trim()) {
-          throw new Error('NAME_MISMATCH');
-        }
-      }
-
       let firebaseUser;
       try {
         console.log('Attempting sign in...');
@@ -324,24 +320,45 @@ export default function App() {
       console.log('User sync complete');
     } catch (error: any) {
       console.error('Login error detail:', error);
+      
+      let displayMsg = 'Ralat tidak diketahui';
+      
+      // Handle the custom JSON error string from handleFirestoreError
+      try {
+        if (error.message && error.message.startsWith('{')) {
+          const detailedErr = JSON.parse(error.message);
+          if (detailedErr.error && detailedErr.error.includes('insufficient permissions')) {
+            displayMsg = 'Tiada kebenaran untuk mengakses data. Sila pastikan akaun anda sah.';
+          } else {
+            displayMsg = `Gagal akses pangkalan data: ${detailedErr.error}`;
+          }
+        }
+      } catch (pErr) {
+        // Not JSON, continue with normal checks
+      }
+
       if (error.message === 'NAME_MISMATCH') {
-        setLoginError('Ralat! Data yang dimasukkan bagi pengguna ini adalah salah. Sila pastikan nama/email anda yang betul.');
-        showToast('Ralat maklumat pengguna.', 'error');
+        displayMsg = 'Ralat! Nama yang dimasukkan tidak sepadan dengan rekod kami bagi emel ini. Sila pastikan ejaan nama penuh anda adalah betul.';
+        showToast('Ralat nama pengguna.', 'error');
+      } else if (error.message === 'ROLE_MISMATCH') {
+        displayMsg = 'Ralat! Peranan anda (Pelajar/Guru) tidak sepadan dengan rekod pendaftaran asal. Sila pastikan anda memilih peran yang betul.';
+        showToast('Ralat peranan pengguna.', 'error');
       } else if (error.code === 'auth/operation-not-allowed') {
-        setLoginError('Sila aktifkan "Email/Password" di Firebase Console > Authentication.');
+        displayMsg = 'Sila aktifkan "Email/Password" di Firebase Console > Authentication.';
       } else if (error.code === 'auth/email-already-in-use' || error.message === 'AUTH_CONFLICT') {
-        setLoginError('Emel ini sudah berdaftar dengan kaedah lain. Sila gunakan emel yang berbeza atau hubungi pentadbir.');
+        displayMsg = 'Emel ini sudah berdaftar dengan kaedah lain. Sila gunakan emel yang berbeza atau hubungi pentadbir.';
       } else if (error.code === 'auth/invalid-email') {
-        setLoginError('Format emel tidak sah.');
+        displayMsg = 'Format emel tidak sah.';
       } else if (error.code === 'auth/network-request-failed') {
-        setLoginError('Ralat rangkaian. Sila semak sambungan internet anda.');
+        displayMsg = 'Ralat rangkaian. Sila semak sambungan internet anda.';
       } else if (error.code === 'auth/internal-error') {
-        setLoginError('Ralat dalaman Firebase. Sila cuba lagi sebentar.');
-      } else {
-        const msg = error.message || 'Ralat tidak diketahui';
-        setLoginError(`Gagal log masuk: ${msg}`);
+        displayMsg = 'Ralat dalaman Firebase. Sila cuba lagi sebentar.';
+      } else if (displayMsg === 'Ralat tidak diketahui') {
+        displayMsg = `Gagal log masuk: ${error.message || 'Sila cuba lagi'}`;
         showToast('Gagal log masuk.', 'error');
       }
+      
+      setLoginError(displayMsg);
     } finally {
       setIsLoggingIn(false);
     }
@@ -351,7 +368,8 @@ export default function App() {
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     let userDoc;
     try {
-      userDoc = await getDoc(userDocRef);
+      // Use getDocFromServer to bypass local cache during login verification
+      userDoc = await getDocFromServer(userDocRef);
     } catch (err) {
       handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
       return;
@@ -361,7 +379,7 @@ export default function App() {
     if (!userDoc.exists()) {
       userData = {
         id: firebaseUser.uid,
-        name: customName || firebaseUser.displayName || 'Anonymous',
+        name: (customName || firebaseUser.displayName || 'Anonymous').trim(),
         email: firebaseUser.email || '',
         role: role
       };
@@ -373,9 +391,42 @@ export default function App() {
       }
     } else {
       userData = userDoc.data() as User;
-      // Validation: If user exists, the provided name must match exactly (case-sensitive, trimmed)
-      if (customName && userData.name.trim() !== customName.trim()) {
-        throw new Error('NAME_MISMATCH');
+      
+      const normalize = (s: string) => (s || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[.\/()\-]/g, ' ') // Remove dots, slashes, brackets, dashes
+        .replace(/\bmohd\b|\bmuhd\b|\bmuhamad\b/g, 'muhammad') // Standardize Muhammad
+        .replace(/\babd\b/g, 'abdul') // Standardize Abdul
+        .replace(/\bbin\b|\bb\b/g, 'bin') // Standardize Bin
+        .replace(/\bbinti\b|\bbt\b|\bbte\b/g, 'binti') // Standardize Binti
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      const storedName = normalize(userData.name);
+      const providedName = normalize(customName || '');
+      
+      // Strict matching requirement but with smart normalization
+      const nameMatch = !customName || storedName === providedName;
+      const roleMatch = userData.role === role;
+
+      if (!nameMatch) {
+        // If normalization fails, check if the provided name is a significant part of the stored name
+        // This helps if they register as "Wan Nur Adlina" but log in as "Adlina"
+        const isPartialMatch = providedName.length > 3 && (storedName.includes(providedName) || providedName.includes(storedName));
+        
+        if (!isPartialMatch) {
+          console.group('Login Name Mismatch Debug');
+          console.log('Stored Name (Normalized):', `"${storedName}"`);
+          console.log('Provided Name (Normalized):', `"${providedName}"`);
+          console.log('Original Stored Name:', `"${userData.name}"`);
+          console.log('Original Provided Name:', `"${customName}"`);
+          console.groupEnd();
+          throw new Error('NAME_MISMATCH');
+        }
+      }
+      if (!roleMatch) {
+        throw new Error('ROLE_MISMATCH');
       }
     }
     
@@ -455,7 +506,7 @@ export default function App() {
       marks: editingEssay?.marks ?? -1,
       feedback: editingEssay?.feedback ?? '',
       status,
-      createdAt: editingEssay?.createdAt || new Date().toISOString(),
+      createdAt: editingEssay?.createdAt || serverTimestamp(),
     };
 
     try {
@@ -926,10 +977,6 @@ function TeacherDashboard({
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
         <h2 className="text-2xl font-bold">Karangan Pelajar</h2>
-        <Button variant="secondary" onClick={onPrint} className="w-full sm:w-auto">
-          <Printer className="w-5 h-5 pointer-events-none" />
-          Cetak Senarai
-        </Button>
       </div>
 
       <div className="space-y-4">
