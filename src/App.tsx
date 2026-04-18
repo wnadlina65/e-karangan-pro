@@ -273,6 +273,19 @@ export default function App() {
       const emailKey = email.toLowerCase().trim();
       const HIDDEN_PASSWORD = 'spm_karangan_secure_no_pass';
       
+      // PRE-AUTH VALIDATION: Check if email exists with a different name
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', emailKey));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const existingUser = querySnapshot.docs[0].data() as User;
+        // Strict comparison: Name must match exactly as stored (case-sensitive, trimmed)
+        if (existingUser.name.trim() !== name.trim()) {
+          throw new Error('NAME_MISMATCH');
+        }
+      }
+
       let firebaseUser;
       try {
         console.log('Attempting sign in...');
@@ -301,7 +314,13 @@ export default function App() {
       }
 
       console.log('Syncing user to Firestore...');
-      await syncUser(firebaseUser, role, name);
+      try {
+        await syncUser(firebaseUser, role, name);
+      } catch (syncError: any) {
+        // Very important: sign out if sync fails so the global listener doesn't log them in
+        await signOut(auth);
+        throw syncError;
+      }
       console.log('User sync complete');
     } catch (error: any) {
       console.error('Login error detail:', error);
@@ -354,8 +373,8 @@ export default function App() {
       }
     } else {
       userData = userDoc.data() as User;
-      // Validation: If user exists, the provided name must match the stored name
-      if (customName && userData.name.toLowerCase().trim() !== customName.toLowerCase().trim()) {
+      // Validation: If user exists, the provided name must match exactly (case-sensitive, trimmed)
+      if (customName && userData.name.trim() !== customName.trim()) {
         throw new Error('NAME_MISMATCH');
       }
     }
