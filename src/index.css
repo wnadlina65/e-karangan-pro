@@ -26,10 +26,30 @@
     font-variant-ligatures: common-ligatures;
   }
 
-  .essay-content p {
-    margin-bottom: 1.5rem;
-    text-indent: 2rem;
-  }
+          /* Print-only elements */
+          .print-only {
+            display: none !important;
+          }
+
+          @media print {
+            .print-only {
+              display: block !important;
+            }
+            
+            .essay-content {
+              font-size: 12pt !important;
+              text-align: justify !important;
+              line-height: 1.6 !important;
+            }
+
+            .essay-title-print {
+              font-size: 18pt !important;
+              font-bold: bold !important;
+              text-align: center !important;
+              margin-bottom: 2rem !important;
+              text-decoration: underline !important;
+            }
+          }
 }
 
 @media print {
@@ -104,13 +124,8 @@
     height: auto !important;
   }
 
-  /* Hide modal header/footer buttons in print */
+  /* Hide modal header/footer in print */
   .p-8.border-b, .p-6.border-t {
-    border-color: #eee !important;
-    background: transparent !important;
-  }
-
-  .p-8.border-b button, .p-6.border-t button {
     display: none !important;
   }
 
@@ -119,7 +134,13 @@
     color: black !important;
   }
 
-  .bg-slate-900, .bg-slate-950, .bg-slate-800, .bg-slate-900\/50 {
+  .print-header {
+    margin-bottom: 2rem;
+    border-bottom: 2px solid black;
+    padding-bottom: 1rem;
+  }
+
+  .bg-slate-900, .bg-slate-950, .bg-slate-800, .bg-slate-900\/50, .bg-emerald-500\/5 {
     background: transparent !important;
     border: none !important;
   }

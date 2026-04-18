@@ -530,6 +530,7 @@ export default function App() {
           <TeacherDashboard 
             essays={essays}
             onGrade={setGradingEssay}
+            onView={setViewingEssay}
             onPrint={handlePrint}
           />
         )}
@@ -867,10 +868,12 @@ function StudentDashboard({
 function TeacherDashboard({ 
   essays, 
   onGrade,
+  onView,
   onPrint
 }: { 
   essays: Essay[], 
   onGrade: (e: Essay) => void,
+  onView: (e: Essay) => void,
   onPrint: () => void
 }) {
   const pending = essays.filter(e => e.status === 'submitted');
@@ -938,9 +941,14 @@ function TeacherDashboard({
                       Belum Dinilai
                     </div>
                   )}
-                  <Button variant="blue" onClick={() => onGrade(essay)} className="whitespace-nowrap">
-                    {essay.marks >= 0 ? 'Kemaskini' : 'Nilai Sekarang'}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="secondary" onClick={() => onView(essay)} className="w-12 h-12 p-0">
+                      <Printer className="w-6 h-6" />
+                    </Button>
+                    <Button variant="blue" onClick={() => onGrade(essay)} className="whitespace-nowrap">
+                      {essay.marks >= 0 ? 'Kemaskini' : 'Nilai Sekarang'}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -1087,6 +1095,27 @@ function ViewModal({ essay, onClose, onPrint }: { essay: Essay, onClose: () => v
         </div>
 
         <div className="flex-1 overflow-y-auto p-10">
+          {/* Print only header */}
+          <div className="print-only print-header">
+            <h1 className="text-3xl font-black text-center uppercase mb-2">E-KARANGAN PRO</h1>
+            <div className="flex justify-between text-sm border-t border-black pt-4 mt-4">
+              <div>
+                <p><strong>Nama Pelajar:</strong> {essay.userName}</p>
+                <p><strong>Tajuk:</strong> {essay.title}</p>
+              </div>
+              <div className="text-right">
+                <p><strong>Tarikh:</strong> {formatDate(essay.createdAt)}</p>
+                <p><strong>Kategori:</strong> Karangan {essay.section}</p>
+              </div>
+            </div>
+            {essay.marks >= 0 && (
+              <div className="mt-4 pt-4 border-t border-black flex justify-between items-center">
+                <p className="text-xl font-bold">MARKAH: {essay.marks}/{essay.section === 'A' ? MAX_MARKS_A : MAX_MARKS_B}</p>
+                <p className="text-lg font-bold">GRED: {getGradeInfo(essay.marks, essay.section).text}</p>
+              </div>
+            )}
+          </div>
+
           <div className="essay-content">
             {essay.content.split('\n').map((p, i) => (
               <p key={i}>
@@ -1169,18 +1198,27 @@ function GradeModal({
         }
       });
 
-      // 2. Internet/AI Check using Gemini
-      const ai = getAiClient();
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Analyze this Malay essay for plagiarism or AI generation:\n\n${essay.content}`,
-        config: { 
-          responseMimeType: "application/json",
-          systemInstruction: "You are a plagiarism detection assistant. Analyze the Malay essay provided for similarity to known online content or common AI-generated patterns. Return JSON with 'score' (0-100) and 'reason' (short string)."
-        }
-      });
+      // 2. Internet/AI Check using Gemini (with Fallback)
+      let internetData = { score: 0, reason: "", failed: false };
+      try {
+        const ai = getAiClient();
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: `Analyze this Malay essay for plagiarism or AI generation:\n\n${essay.content}`,
+          config: { 
+            responseMimeType: "application/json",
+            systemInstruction: "You are a plagiarism detection assistant. Analyze the Malay essay provided for similarity to known online content or common AI-generated patterns. Return JSON with 'score' (0-100) and 'reason' (short string)."
+          }
+        });
+        const parsed = JSON.parse(response.text || '{"score": 0, "reason": ""}');
+        internetData.score = parsed.score;
+        internetData.reason = parsed.reason;
+        internetData.failed = false;
+      } catch (aiError) {
+        console.warn("AI Check failed, falling back to local database comparison only.", aiError);
+        internetData.failed = true;
+      }
 
-      const internetData = JSON.parse(response.text || '{"score": 0, "reason": ""}');
       const finalScore = Math.max(Math.round(maxSimilarity * 100), internetData.score);
       let details = "";
       
@@ -1190,7 +1228,14 @@ function GradeModal({
       if (internetData.score > 30) {
         details += `Analisis AI menunjukkan kebarangkalian kandungan disalin atau dijana AI (${internetData.score}%). `;
       }
-      if (!details) details = "Tiada unsur plagiat ketara dikesan.";
+
+      if (internetData.failed) {
+        details += "(Sistem menggunakan perbandingan pangkalan data tempatan sahaja kerana talian ke AI sedang sibuk). ";
+      }
+
+      if (!details || details === "(Sistem menggunakan perbandingan pangkalan data tempatan sahaja kerana talian ke AI sedang sibuk). ") {
+        details = "Tiada unsur plagiat ketara dikesan melalui perbandingan pangkalan data.";
+      }
 
       setPlagiarismReport({ score: finalScore, details });
     } catch (error) {
