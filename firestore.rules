@@ -1,8 +1,100 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Default deny catch-all
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- User Validation ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'email', 'role']) &&
+             data.id == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.email is string && data.email.size() <= 100 &&
+             data.role in ['student', 'teacher'] &&
+             (!('teacherId' in data) || (data.teacherId is string && data.teacherId.size() <= 128));
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn(); // Allow any signed in user to get profile (needed for teacher selection/display)
+      allow list: if isSignedIn() && resource.data.role == 'teacher'; // Students can list teachers
+      
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && (
+        // Action: Update profile (e.g., student selecting teacher)
+        incoming().role == existing().role && // Role is immutable
+        incoming().email == existing().email && // Email is immutable
+        incoming().diff(existing()).affectedKeys().hasOnly(['teacherId', 'name'])
+      );
+    }
+
+    // --- Essay Validation ---
+    function isValidEssay(data) {
+      return data.keys().hasAll(['userId', 'userName', 'teacherId', 'title', 'content', 'section', 'status', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.userName is string && data.userName.size() <= 200 &&
+             data.teacherId is string && data.teacherId.size() <= 128 &&
+             data.title is string && data.title.size() <= 300 &&
+             data.content is string && data.content.size() <= 100000 &&
+             data.section in ['A', 'B'] &&
+             data.status in ['draft', 'submitted', 'reviewed'] &&
+             data.createdAt is timestamp &&
+             (!('marks' in data) || (data.marks is number && data.marks >= -1 && data.marks <= 100)) &&
+             (!('feedback' in data) || (data.feedback is string && data.feedback.size() <= 5000));
+    }
+
+    match /essays/{essayId} {
+      allow get: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        resource.data.teacherId == request.auth.uid
+      );
+      
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        resource.data.teacherId == request.auth.uid
+      );
+
+      allow create: if isSignedIn() && isValidEssay(incoming()) && incoming().createdAt == request.time;
+      
+      allow update: if isSignedIn() && isValidEssay(incoming()) && (
+        // Action: Student editing draft
+        (existing().userId == request.auth.uid && existing().status == 'draft' && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'section', 'status'])) ||
+        
+        // Action: Student submitting
+        (existing().userId == request.auth.uid && existing().status == 'draft' && 
+         incoming().status == 'submitted' &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+         
+        // Action: Teacher reviewing
+        (existing().teacherId == request.auth.uid && existing().status == 'submitted' &&
+         incoming().status == 'reviewed' &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'marks', 'feedback']))
+      );
+      
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid && existing().status == 'draft';
     }
   }
 }

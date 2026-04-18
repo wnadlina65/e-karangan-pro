@@ -5,7 +5,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signOut, onAuthStateChanged, User as FirebaseUser, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot, getDocFromServer, DocumentData, FirestoreError } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot, getDocFromServer, serverTimestamp, DocumentData, FirestoreError } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
@@ -79,5 +79,5 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 // }
 // testConnection();
 
-export { signOut, onAuthStateChanged, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously };
+export { signOut, onAuthStateChanged, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, onSnapshot, getDocFromServer, serverTimestamp, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously };
 export type { FirebaseUser, DocumentData, FirestoreError };

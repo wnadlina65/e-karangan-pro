@@ -26,7 +26,7 @@ export interface Essay {
   marks: number; // -1 if not graded
   feedback: string;
   status: EssayStatus;
-  createdAt: string;
+  createdAt: any;
 }
 
 export interface GradeInfo {

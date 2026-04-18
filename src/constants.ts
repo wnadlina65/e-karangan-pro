@@ -25,8 +25,10 @@ export function getGradeInfo(marks: number, section: 'A' | 'B' = 'B'): GradeInfo
   return { text: 'Sangat Lemah ❌', color: '#ef4444', stars: 1 };                   
 }
 
-export function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('ms-MY', {
+export function formatDate(dateStr: any): string {
+  if (!dateStr) return 'Tiada Tarikh';
+  const date = dateStr?.toDate ? dateStr.toDate() : new Date(dateStr);
+  return date.toLocaleDateString('ms-MY', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
