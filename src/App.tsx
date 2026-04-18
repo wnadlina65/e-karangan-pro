@@ -305,7 +305,10 @@ export default function App() {
       console.log('User sync complete');
     } catch (error: any) {
       console.error('Login error detail:', error);
-      if (error.code === 'auth/operation-not-allowed') {
+      if (error.message === 'NAME_MISMATCH') {
+        setLoginError('Ralat! Data yang dimasukkan bagi pengguna ini adalah salah. Sila pastikan nama/email anda yang betul.');
+        showToast('Ralat maklumat pengguna.', 'error');
+      } else if (error.code === 'auth/operation-not-allowed') {
         setLoginError('Sila aktifkan "Email/Password" di Firebase Console > Authentication.');
       } else if (error.code === 'auth/email-already-in-use' || error.message === 'AUTH_CONFLICT') {
         setLoginError('Emel ini sudah berdaftar dengan kaedah lain. Sila gunakan emel yang berbeza atau hubungi pentadbir.');
@@ -351,6 +354,10 @@ export default function App() {
       }
     } else {
       userData = userDoc.data() as User;
+      // Validation: If user exists, the provided name must match the stored name
+      if (customName && userData.name.toLowerCase().trim() !== customName.toLowerCase().trim()) {
+        throw new Error('NAME_MISMATCH');
+      }
     }
     
     setUser(userData);
